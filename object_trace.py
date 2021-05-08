@@ -1,8 +1,9 @@
 import sys
 import gc
+import dataclasses
 import collections
 import threading
-from typing import NamedTuple, Tuple, Set, Optional
+from typing import NamedTuple, Tuple, Set, Optional, List
 import inspect
 from warnings import warn
 
@@ -24,27 +25,30 @@ def _stop_local_tracing(*args):
     return None  # No-op
 
 
-class CountEvent(NamedTuple):
+@dataclasses.dataclass
+class Event:
     call: "Call"
     line_no: int
+
+    @property
+    def source_line(self):
+        source_lines, first_line_no = inspect.getsourcelines(self.call.code)
+        return source_lines[self.line_no - first_line_no]
+
+
+@dataclasses.dataclass
+class CountEvent(Event):
     old_refcount: int
     new_refcount: int
 
     def __repr__(self):
-        code = self.call.code
-        return (
-            f"Count<{code.co_filename} {code.co_name}:{self.line_no} "
-            f"{self.old_refcount}->{self.new_refcount} >"
-        )
+        return f"{self.line_no:<4}: count {self.old_refcount}->{self.new_refcount}"
 
 
-class UseEvent(NamedTuple):
-    call: "Call"
-    line_no: int
-
+@dataclasses.dataclass
+class UseEvent(Event):
     def __repr__(self):
-        code = self.call.code
-        return f"Use<{code.co_filename} {code.co_name}:{self.line_no}>"
+        return f"{self.line_no:<4}: use"
 
 
 class Trace:
@@ -74,15 +78,53 @@ class Trace:
         self.log.append(UseEvent(call, line_no))
 
     def format(self, output):
+        tab = "  "
+        old_stacktrace = []
+
         for record in self.log:
-            output.write(str(record))
-            output.write("\n")
+            new_call_stack = record.call.stacktrace
+
+            depth = 0
+
+            for old_call, new_call in zip(old_stacktrace, new_call_stack):
+                if old_call is new_call:
+                    depth += 1
+                else:
+                    break
+
+            while depth < len(new_call_stack):
+                code = new_call_stack[depth].code
+                _, first_line_no = inspect.getsourcelines(code)
+                output.write(tab * depth)
+                output.write(f"{code.co_filename}:{first_line_no} ({code.co_name})\n")
+                depth += 1
+
+            s = tab * depth + str(record)
+
+            output.write(
+                "".join(
+                    [s, " " * (40 - len(s)), "| ", record.source_line.strip(), "\n"]
+                )
+            )
+
+            old_stacktrace = new_call_stack
 
 
-class Call(NamedTuple):
-    code: None
+@dataclasses.dataclass
+class Call:
+    code: "code"
     parent: Optional["Call"]
     traces: Set[Trace]
+    _stacktrace: Optional[List["Call"]] = None
+
+    @property
+    def stacktrace(self) -> List["Call"]:
+        if self._stacktrace is None:
+            if self.parent is None:
+                self._stacktrace = [self]
+            else:
+                self._stacktrace = [*self.parent.stacktrace, self]
+        return self._stacktrace
 
 
 class Tracer:
@@ -141,8 +183,6 @@ class Tracer:
         sys.settrace(None)
         threading.settrace(None)
         Tracer.ACTIVE_PROFILER = None
-
-        # print("All traced:", self.all_traces)
 
     def _get_call(self, frame) -> Call:
         try:
