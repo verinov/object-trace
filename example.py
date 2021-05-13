@@ -10,12 +10,12 @@ def f2(x):
 
 def func():
     a = [1, 2, 3, 4]
-    trace(a, "a")
-    data["a"] = trace(3, "3")
+    trace(a, label="a")
+    data["a"] = trace(3, label="3")
     data["b"] = f2(a)
     a = 11
     data["b"] = f2(3)
-    data["a"] = trace(3, "3")
+    data["a"] = trace(3, label="3")
     2 + 4
     str(3) + str(3 + 1)
     "a"
@@ -24,8 +24,10 @@ def func():
 
 with Tracer() as tt:
     func()
+    x = data["b"]
+    x = x + x
 
-for trace in tt.all_traces:
-    print(f"# Trace for label=`{trace.label}`")
-    trace.format(stdout)
+for t in tt.all_traces:
+    print(f"# Trace for label=`{t.label}`")
+    t.format(stdout)
     print("-" * 80)
