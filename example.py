@@ -3,10 +3,10 @@ from sys import stdout
 
 import glob
 
-with Tracer() as tt:
+with Tracer() as traces:
     glob.glob(trace("./*", "glob"))
 
-for t in tt.all_traces:
+for t in traces:
     print(f"# Trace for label=`{t.label}`")
     t.format(stdout)
     print("-" * 80)

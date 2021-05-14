@@ -33,7 +33,7 @@ class CountEvent(Event):
 
     @property
     def info(self):
-        return f"RC {self.old_refcount}->{self.new_refcount}"
+        return f"Ref count {self.old_refcount}->{self.new_refcount}"
 
 
 @dataclasses.dataclass
@@ -74,6 +74,7 @@ class Trace:
 
     def format(self, output) -> None:
         old_stacktrace: List["Call"] = []
+        TAB = "  "
 
         def matching_prefix_size(s1, s2):
             n = 0
@@ -85,13 +86,12 @@ class Trace:
             return n
 
         def write_line(depth: int, line_no: Optional[int], info: str, source_line: str):
-            tab = "  "
             s = f"{'_' if line_no is None else line_no:<4}: {info}"
 
             output.write(
                 "".join(
                     [
-                        tab * depth,
+                        TAB * depth,
                         s,
                         " " * (40 - len(s)),
                         "| ",
@@ -113,10 +113,11 @@ class Trace:
                 write_line(
                     depth,
                     call.parent_lineno,
-                    f"call `{code.co_name}` ({code.co_filename}:{first_line_no})",
+                    f"call `{code.co_name}`",
                     call.caller_source_line,
                 )
                 depth += 1
+                output.write(TAB * depth + f"[{code.co_filename}:{first_line_no}]\n")
 
             write_line(
                 depth,
@@ -211,7 +212,7 @@ class Tracer:
 
         sys.settrace(self._trace_any)
         threading.settrace(self._trace_any)
-        return self
+        return self.all_traces
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if Tracer.ACTIVE_TRACER is not self:
