@@ -283,7 +283,7 @@ class Tracer:
 
             if old_refcount != new_refcount:
                 call = self._get_call(frame)
-                line_no = frame.f_lineno - 1
+                line_no = frame.f_lineno
                 for trace in self._traces[id_] & call.traces:
                     trace.count_change(call, line_no, old_refcount, new_refcount)
 
