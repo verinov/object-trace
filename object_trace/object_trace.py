@@ -1,8 +1,6 @@
 import collections
 import dataclasses
-import gc
 import inspect
-import glob
 import sys
 import threading
 from typing import List, Optional, Set, Callable
@@ -246,7 +244,7 @@ class Tracer:
     def add_object(self, x, label: str, frame_filter=lambda frame: True):
         id_ = id(x)
         self._objects[id_] = x
-        self._refcounts[id_] = len(gc.get_referrers(x)) - 1
+        self._refcounts[id_] = sys.getrefcount(x)
 
         trace = Trace(id_, label, frame_filter)
         self._traces[id_].add(trace)
@@ -280,7 +278,7 @@ class Tracer:
     def _trace_line(self, frame, event_type, arg):
         for id_ in list(self._traces):
             old_refcount = self._refcounts[id_]
-            new_refcount = len(gc.get_referrers(self._objects[id_])) - 1
+            new_refcount = sys.getrefcount(self._objects[id_])
 
             if old_refcount != new_refcount:
                 call = self._get_call(frame)
