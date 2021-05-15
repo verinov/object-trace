@@ -206,7 +206,6 @@ class Tracer:
 
         Tracer.ACTIVE_TRACER = self
 
-        sys.settrace(self._trace_any)
         threading.settrace(self._trace_any)
         return self.all_traces
 
@@ -217,7 +216,6 @@ class Tracer:
         # put the final state in traces
         self._trace_line(sys._getframe(1), "line", None)
 
-        sys.settrace(None)
         threading.settrace(None)
         Tracer.ACTIVE_TRACER = None
 
