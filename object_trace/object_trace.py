@@ -2,8 +2,9 @@ import collections
 import dataclasses
 import inspect
 import sys
+import gc
 import threading
-from typing import List, Optional, Set, Callable
+from typing import List, Optional, Set, Callable, Iterator
 from types import CodeType
 from warnings import warn
 
@@ -70,7 +71,7 @@ class Trace:
 
         self.log.append(UseEvent(call, line_no))
 
-    def format(self, output) -> None:
+    def format_lines(self) -> Iterator[str]:
         old_stacktrace: List["Call"] = []
         TAB = "  "
 
@@ -83,20 +84,12 @@ class Trace:
                     break
             return n
 
-        def write_line(depth: int, line_no: Optional[int], info: str, source_line: str):
+        def format_line(
+            depth: int, line_no: Optional[int], info: str, source_line: str
+        ):
             s = f"{'_' if line_no is None else line_no:<4}: {info}"
-
-            output.write(
-                "".join(
-                    [
-                        TAB * depth,
-                        s,
-                        " " * (40 - len(s)),
-                        "| ",
-                        source_line.strip(),
-                        "\n",
-                    ]
-                )
+            return "".join(
+                [TAB * depth, s, " " * (40 - len(s)), "| ", source_line.strip()]
             )
 
         for record in self.log:
@@ -108,16 +101,16 @@ class Trace:
                 code = call.code
                 _, first_line_no = inspect.getsourcelines(code)
 
-                write_line(
+                yield format_line(
                     depth,
                     call.parent_lineno,
                     f"call `{code.co_name}`",
                     call.caller_source_line,
                 )
                 depth += 1
-                output.write(TAB * depth + f"[{code.co_filename}:{first_line_no}]\n")
+                yield TAB * depth + f"[{code.co_filename}:{first_line_no}]"
 
-            write_line(
+            yield format_line(
                 depth,
                 record.line_no,
                 record.info,
@@ -216,6 +209,9 @@ class Tracer:
         if Tracer.ACTIVE_TRACER is not self:
             return
 
+        # put the final state in traces
+        self._trace_line(sys._getframe(1), "line", None)
+
         sys.settrace(None)
         threading.settrace(None)
         Tracer.ACTIVE_TRACER = None
@@ -226,7 +222,9 @@ class Tracer:
         except KeyError:
             pass
 
-        if frame.f_code not in self._exclude_codes:
+        if frame.f_code in self._exclude_codes:
+            frame.f_trace = self._trace_return
+        else:
             frame.f_trace = self._trace_any
 
         traces = {
@@ -241,10 +239,16 @@ class Tracer:
         )
         return call
 
+    def _get_refcount(self, id_):
+        return sys.getrefcount(self._objects[id_]) - 2
+
     def add_object(self, x, label: str, frame_filter=lambda frame: True):
         id_ = id(x)
         self._objects[id_] = x
-        self._refcounts[id_] = sys.getrefcount(x)
+
+        del x
+        gc.collect()
+        self._refcounts[id_] = self._get_refcount(id_)
 
         trace = Trace(id_, label, frame_filter)
         self._traces[id_].add(trace)
@@ -259,42 +263,46 @@ class Tracer:
                 frame.f_trace_opcodes = True
                 call.traces.add(trace)
 
-        return x
+        return self._objects[id_]
 
     def _trace_any(self, frame, event_type, arg):
         return self._trace_handlers[event_type](frame, event_type, arg)
 
     def _trace_call(self, frame, event_type, arg):
         if frame.f_code in self._exclude_codes:
-            return None
-
-        frame.f_trace_lines = frame.f_trace_opcodes = bool(self._get_call(frame).traces)
-        return self._trace_any
+            frame.f_trace_lines = frame.f_trace_opcodes = False
+            return self._trace_return
+        else:
+            frame.f_trace_lines = frame.f_trace_opcodes = bool(
+                self._get_call(frame).traces
+            )
+            return self._trace_any
 
     def _trace_return(self, frame, event_type, arg):
-        self._live_calls.pop(frame, None)
+        if event_type == "return":
+            self._live_calls.pop(frame, None)
         # return value is ignored
 
     def _trace_line(self, frame, event_type, arg):
+        gc.collect()
         for id_ in list(self._traces):
             old_refcount = self._refcounts[id_]
-            new_refcount = sys.getrefcount(self._objects[id_])
+            new_refcount = self._get_refcount(id_)
+            if old_refcount == new_refcount:
+                continue
 
-            if old_refcount != new_refcount:
-                call = self._get_call(frame)
-                line_no = frame.f_lineno
-                for trace in self._traces[id_] & call.traces:
-                    trace.count_change(call, line_no, old_refcount, new_refcount)
+            self._refcounts[id_] = new_refcount
 
+            call = self._get_call(frame)
+            line_no = frame.f_lineno
+            for trace in self._traces[id_] & call.traces:
+                trace.count_change(call, line_no, old_refcount, new_refcount)
             if new_refcount == 0:
                 # clean up
                 for trace in self._traces.pop(id_):
                     trace.close()
                 del self._refcounts[id_]
                 del self._objects[id_]
-
-            else:
-                self._refcounts[id_] = new_refcount
 
         return self._trace_any
 
