@@ -179,7 +179,12 @@ class Tracer:
                 threading.settrace,
                 inspect.currentframe,
                 trace,
-                *[f for _, f in inspect.getmembers(Tracer, inspect.isfunction)],
+                *[
+                    f
+                    for v in globals().values()
+                    if inspect.isclass(v)
+                    for _, f in inspect.getmembers(v, inspect.isfunction)
+                ],
             ]
         }
 
@@ -222,10 +227,9 @@ class Tracer:
         except KeyError:
             pass
 
-        if frame.f_code in self._exclude_codes:
-            frame.f_trace = self._trace_return
-        else:
-            frame.f_trace = self._trace_any
+        assert frame.f_code not in self._exclude_codes, "Tracing inside object_trace"
+
+        frame.f_trace = self._trace_any
 
         traces = {
             trace
@@ -270,8 +274,7 @@ class Tracer:
 
     def _trace_call(self, frame, event_type, arg):
         if frame.f_code in self._exclude_codes:
-            frame.f_trace_lines = frame.f_trace_opcodes = False
-            return self._trace_return
+            return _empty_handler
         else:
             frame.f_trace_lines = frame.f_trace_opcodes = bool(
                 self._get_call(frame).traces
