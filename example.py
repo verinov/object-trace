@@ -1,24 +1,16 @@
-from object_trace import trace, Tracer
-import itertools
-
-import glob
-
-a = []
+from object_trace import trace, print_traces
 
 
-def f():
-    global a
-    a.append(1)
-    a = []
+def producer_of_X(cache):
+    cache["X"] = trace(42.42, "X")
 
 
-with Tracer() as traces:
-    trace(a, "list")
-    glob.glob(trace("./*", "glob"))
-    f()
+def inscrutable_user_of_X(cache):
+    cache["Y"] = cache["X"] + 1
+    cache["X"] = 15.1
 
-for t in traces:
-    print(f"# Trace for label=`{t.label}`")
-    for line, _ in itertools.groupby(t.format_lines()):
-        print(line)
-    print("-" * 80)
+
+with print_traces():
+    d = {}
+    producer_of_X(d)
+    inscrutable_user_of_X(d)

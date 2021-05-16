@@ -15,6 +15,10 @@ def _empty_handler(frame, event_type, arg):
     return None
 
 
+def _default_frame_filter(frame):
+    return True
+
+
 @dataclasses.dataclass
 class Event:
     call: "Call"
@@ -179,6 +183,7 @@ class Tracer:
                 threading.settrace,
                 inspect.currentframe,
                 trace,
+                _default_frame_filter,
                 *[
                     f
                     for v in globals().values()
@@ -246,7 +251,7 @@ class Tracer:
     def _get_refcount(self, id_):
         return sys.getrefcount(self._objects[id_]) - 2
 
-    def add_object(self, x, label: str, frame_filter=lambda frame: True):
+    def add_object(self, x, label: str, frame_filter=_default_frame_filter):
         id_ = id(x)
         self._objects[id_] = x
 
@@ -283,6 +288,7 @@ class Tracer:
 
     def _trace_return(self, frame, event_type, arg):
         if event_type == "return":
+            self._trace_line(frame, None, None)
             self._live_calls.pop(frame, None)
         # return value is ignored
 
